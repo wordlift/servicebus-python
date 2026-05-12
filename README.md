@@ -4,26 +4,20 @@ Reusable Azure Service Bus consumers, publishers, and receiver factories for Wor
 
 ## Installation
 
-The package is published to [GitHub Packages](https://github.com/orgs/wordlift/packages). Add the registry to your `uv` configuration:
+Releases are published as wheel assets on [GitHub Releases](https://github.com/wordlift/wordlift-servicebus-python/releases). Add the dependency via a git tag reference:
+
+```bash
+uv add "wordlift-servicebus @ git+https://github.com/wordlift/wordlift-servicebus-python@0.1.0"
+```
+
+Or pin the source in `pyproject.toml` while keeping the version constraint separate:
 
 ```toml
-# pyproject.toml
-[[tool.uv.index]]
-name = "wordlift-github"
-url = "https://pypi.pkg.github.com/wordlift/"
-```
+[project]
+dependencies = ["wordlift-servicebus>=0.1.0"]
 
-Then add the dependency:
-
-```bash
-uv add wordlift-servicebus
-```
-
-Authenticating against GitHub Packages requires a personal access token with `read:packages` scope:
-
-```bash
-export UV_INDEX_WORDLIFT_GITHUB_USERNAME=<github-username>
-export UV_INDEX_WORDLIFT_GITHUB_PASSWORD=<github-pat>
+[tool.uv.sources]
+wordlift-servicebus = { git = "https://github.com/wordlift/wordlift-servicebus-python", tag = "0.1.0" }
 ```
 
 ## Public API
