@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
 from azure.servicebus import ServiceBusMessage
@@ -25,7 +26,7 @@ async def publish(
 async def publish_batch(
     client: ServiceBusClient,
     queue_name: str,
-    messages: list[SerializableMessage],
+    messages: Sequence[SerializableMessage],
 ) -> None:
     """Send messages using a Service Bus batch, flushing when the 256 KB limit is hit."""
     async with client.get_queue_sender(queue_name) as sender:
