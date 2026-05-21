@@ -1,6 +1,6 @@
 [project]
 name = "wordlift-servicebus"
-version = "0.1.3"
+version = "0.1.4"
 description = "Reusable Azure Service Bus consumers, publishers, and receiver factories for WordLift services"
 readme = "README.md"
 requires-python = ">=3.12"
