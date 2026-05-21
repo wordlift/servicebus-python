@@ -166,6 +166,17 @@ async def test_parse_error_dead_letters_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_invalid_json_dead_letters_message() -> None:
+    handler = AsyncMock()
+    receiver = _FakeReceiver(["not-valid-json{{{"])
+
+    await _run(receiver, handler)
+
+    receiver.dead_letter_message.assert_awaited_once()
+    handler.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_lock_lost_on_dead_letter_does_not_raise() -> None:
     handler = AsyncMock(side_effect=RuntimeError("unexpected"))
     receiver = _FakeReceiver(
