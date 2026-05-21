@@ -350,3 +350,62 @@ async def test_concurrent_consumer_continues_on_empty_batch() -> None:
     assert processed == ["c1"]
     assert receiver.complete_message.call_count == 1
     factory.assert_called_once()  # no reconnect on empty batch
+
+
+@pytest.mark.asyncio
+async def test_concurrent_consumer_prunes_completed_tasks_on_idle_poll() -> None:
+    """Done task refs must be removed from the internal list on each idle poll.
+
+    Without the prune, the list grows unboundedly across idle cycles (memory leak).
+    The receiver here waits for all in-flight tasks to finish before returning the
+    idle batch, which guarantees every task is .done() when the prune line runs.
+    """
+    stopped = asyncio.Event()
+    consumer = ConcurrentConsumer(stopped)
+
+    created_tasks: list[asyncio.Task] = []
+    _orig_create_task = asyncio.create_task
+
+    def _track(coro, **kw):  # type: ignore[no-untyped-def]
+        t = _orig_create_task(coro, **kw)
+        created_tasks.append(t)
+        return t
+
+    class _BarrierReceiver(_FakeBatchReceiver):
+        """Waits for all previously-created tasks to finish before each receive."""
+
+        async def receive_messages(
+            self, max_message_count: int, max_wait_time: float
+        ) -> list[str]:
+            if created_tasks:
+                await asyncio.gather(*created_tasks, return_exceptions=True)
+            return await super().receive_messages(max_message_count, max_wait_time)
+
+    # one real batch of 2, then an idle batch, then stop
+    receiver = _BarrierReceiver([[_payload(id="p1"), _payload(id="p2")], []])
+
+    mock_renewer = MagicMock()
+    mock_renewer.__aenter__ = AsyncMock(return_value=mock_renewer)
+    mock_renewer.__aexit__ = AsyncMock(return_value=False)
+    mock_renewer.register = MagicMock()
+
+    factory = MagicMock(return_value=_AsyncCtx(receiver))
+    stopped.is_set = lambda: len(receiver._batches) == 0  # type: ignore[method-assign]
+
+    with patch(
+        "wordlift_servicebus.consumers.AutoLockRenewer", return_value=mock_renewer
+    ):
+        with patch("asyncio.create_task", side_effect=_track):
+            await consumer.consume(
+                factory,
+                "queue=test",
+                _TestMessage,
+                AsyncMock(),
+                10,
+                _LOCK_RENEWAL_MAX_S,
+            )
+
+    assert len(created_tasks) == 2, "one task per message"
+    assert all(t.done() for t in created_tasks), "all tasks must have completed"
+    assert receiver.complete_message.call_count == 2, "all messages must be acked"
+    factory.assert_called_once()  # no reconnect on idle poll

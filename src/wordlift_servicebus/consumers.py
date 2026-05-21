@@ -193,6 +193,7 @@ class ConcurrentConsumer(MessageConsumer):
                             max_wait_time=receiver_max_wait_time,
                         )
                         if not batch:
+                            tasks = [t for t in tasks if not t.done()]
                             continue
 
                         for r in batch:
