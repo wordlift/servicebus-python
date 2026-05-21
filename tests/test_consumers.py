@@ -312,3 +312,41 @@ async def test_concurrent_consumer_respects_max_concurrent() -> None:
         )
 
     assert receiver._receive_calls[0]["max_message_count"] <= 3
+
+
+@pytest.mark.asyncio
+async def test_concurrent_consumer_continues_on_empty_batch() -> None:
+    """An empty batch must not disconnect; the consumer keeps polling on the same connection."""
+    stopped = asyncio.Event()
+    consumer = ConcurrentConsumer(stopped)
+    processed: list[str] = []
+
+    async def handler(msg: _TestMessage) -> None:
+        processed.append(msg.id)
+
+    # leading empty batch, then a real message
+    receiver = _FakeBatchReceiver([[], [_payload(id="c1")]])
+
+    mock_renewer = MagicMock()
+    mock_renewer.__aenter__ = AsyncMock(return_value=mock_renewer)
+    mock_renewer.__aexit__ = AsyncMock(return_value=False)
+    mock_renewer.register = MagicMock()
+
+    factory = MagicMock(return_value=_AsyncCtx(receiver))
+    stopped.is_set = lambda: len(receiver._batches) == 0  # type: ignore[method-assign]
+
+    with patch(
+        "wordlift_servicebus.consumers.AutoLockRenewer", return_value=mock_renewer
+    ):
+        await consumer.consume(
+            factory,
+            "queue=test",
+            _TestMessage,
+            AsyncMock(side_effect=handler),
+            10,
+            _LOCK_RENEWAL_MAX_S,
+        )
+
+    assert processed == ["c1"]
+    assert receiver.complete_message.call_count == 1
+    factory.assert_called_once()  # no reconnect on empty batch

@@ -193,7 +193,7 @@ class ConcurrentConsumer(MessageConsumer):
                             max_wait_time=receiver_max_wait_time,
                         )
                         if not batch:
-                            break
+                            continue
 
                         for r in batch:
                             in_flight += 1
