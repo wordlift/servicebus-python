@@ -409,3 +409,90 @@ async def test_concurrent_consumer_prunes_completed_tasks_on_idle_poll() -> None
     assert all(t.done() for t in created_tasks), "all tasks must have completed"
     assert receiver.complete_message.call_count == 2, "all messages must be acked"
     factory.assert_called_once()  # no reconnect on idle poll
+
+
+@pytest.mark.asyncio
+async def test_concurrent_consumer_prunes_renewer_futures_on_idle_poll() -> None:
+    """Done AutoLockRenewer futures must be removed from _futures on each idle poll.
+
+    Each register() call appends a Future to renewer._futures. Without pruning,
+    that list grows unboundedly across idle cycles even after messages are settled.
+    """
+    stopped = asyncio.Event()
+    consumer = ConcurrentConsumer(stopped)
+
+    loop = asyncio.get_running_loop()
+    done_futures: list[asyncio.Future] = [loop.create_future(), loop.create_future()]
+    for f in done_futures:
+        f.set_result(None)
+
+    # A single idle batch is enough to trigger the prune path.
+    receiver = _FakeBatchReceiver([])
+
+    mock_renewer = MagicMock()
+    mock_renewer.__aenter__ = AsyncMock(return_value=mock_renewer)
+    mock_renewer.__aexit__ = AsyncMock(return_value=False)
+    mock_renewer.register = MagicMock()
+    mock_renewer._futures = list(done_futures)
+
+    factory = MagicMock(return_value=_AsyncCtx(receiver))
+    stopped.is_set = lambda: len(receiver._batches) == 0  # type: ignore[method-assign]
+
+    with patch(
+        "wordlift_servicebus.consumers.AutoLockRenewer", return_value=mock_renewer
+    ):
+        await consumer.consume(
+            factory,
+            "queue=test",
+            _TestMessage,
+            AsyncMock(),
+            10,
+            _LOCK_RENEWAL_MAX_S,
+        )
+
+    assert mock_renewer._futures == [], "done futures must be pruned on idle poll"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_consumer_prunes_tasks_and_futures_when_slots_full() -> None:
+    """Both tasks and renewer futures must be pruned each time the slot-full branch fires.
+
+    With max_concurrent=1 and one in-flight message, every loop iteration hits
+    slots <= 0 until the task finishes.  Done futures pre-loaded on the renewer
+    must be cleared on the first slot-full poll, not left to accumulate.
+    """
+    stopped = asyncio.Event()
+    consumer = ConcurrentConsumer(stopped)
+
+    loop = asyncio.get_running_loop()
+    stale_future: asyncio.Future = loop.create_future()
+    stale_future.set_result(None)
+
+    # one real message then idle; max_concurrent=1 guarantees the slot-full branch fires
+    receiver = _FakeBatchReceiver([[_payload(id="q1")], []])
+
+    mock_renewer = MagicMock()
+    mock_renewer.__aenter__ = AsyncMock(return_value=mock_renewer)
+    mock_renewer.__aexit__ = AsyncMock(return_value=False)
+    mock_renewer.register = MagicMock()
+    mock_renewer._futures = [stale_future]
+
+    factory = MagicMock(return_value=_AsyncCtx(receiver))
+    stopped.is_set = lambda: len(receiver._batches) == 0  # type: ignore[method-assign]
+
+    with patch(
+        "wordlift_servicebus.consumers.AutoLockRenewer", return_value=mock_renewer
+    ):
+        await consumer.consume(
+            factory,
+            "queue=test",
+            _TestMessage,
+            AsyncMock(),
+            1,  # max_concurrent=1 → slot fills immediately after first message
+            _LOCK_RENEWAL_MAX_S,
+            slot_poll_interval=0,  # asyncio.sleep(0) so the task gets CPU without delay
+        )
+
+    assert mock_renewer._futures == [], "done futures must be pruned on slot-full poll"
+    assert receiver.complete_message.call_count == 1
+    factory.assert_called_once()

@@ -185,6 +185,9 @@ class ConcurrentConsumer(MessageConsumer):
                         if slots <= 0:
                             await asyncio.sleep(slot_poll_interval)
                             tasks = [t for t in tasks if not t.done()]
+                            renewer._futures = [
+                                f for f in renewer._futures if not f.done()
+                            ]
                             in_flight = len(tasks)
                             continue
 
@@ -194,6 +197,9 @@ class ConcurrentConsumer(MessageConsumer):
                         )
                         if not batch:
                             tasks = [t for t in tasks if not t.done()]
+                            renewer._futures = [
+                                f for f in renewer._futures if not f.done()
+                            ]
                             continue
 
                         for r in batch:
