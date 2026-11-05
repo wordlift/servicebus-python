@@ -50,7 +50,7 @@ from wordlift_servicebus import publish, publish_batch, publish_scheduled, publi
 |---|---|
 | `publish(client, queue, msg)` | Send a single message to a queue |
 | `publish_topic(client, topic, msg)` | Send a single message to a topic |
-| `publish_batch(client, queue, msgs)` | Send messages in batches, auto-flushing on size limit |
+| `publish_batch(client, queue, msgs)` | Send messages in batches, auto-flushing on size limit. Each batch is capped 2 KiB below the link limit, because the SDK's `size_in_bytes` leaves out the batch envelope's properties: 56 bytes by default, up to ~1.6 KB with 128-character non-ASCII IDs. A message too big for a capped batch is sent on its own |
 | `publish_scheduled(client, queue, msg, delay_seconds)` | Enqueue a message with a future delivery time |
 
 ### Receiver factories
